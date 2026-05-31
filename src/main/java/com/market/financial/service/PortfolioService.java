@@ -11,9 +11,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.market.financial.dto.AssetPositionDTO;
-import com.market.financial.dto.PortfolioConsolidadoDTO;
-import com.market.financial.dto.PortfolioConsolidadoDataSummaryDTO;
+import com.market.financial.dto.PortfolioConsolidatedDTO;
+import com.market.financial.dto.PortfolioConsolidatedSummaryDTO;
 import com.market.financial.dto.PortfolioSummaryDTO;
+import com.market.financial.dto.PortfolioTotalDTO; // Importação adicionada
 import com.market.financial.model.MonthlyConsolidated;
 import com.market.financial.model.Price;
 import com.market.financial.model.Transaction;
@@ -27,10 +28,9 @@ public class PortfolioService {
 
         private final TransactionRepository transactionRepository;
         private final AssetRepository assetRepository;
-        private final PriceRepository priceRepository; // Usado para ambas as lógicas de preço
+        private final PriceRepository priceRepository;
         private final MonthlyConsolidatedRepository consolidatedRepo;
 
-        // CONSTRUTOR ÚNICO: Injeta todos os 4 repositórios necessários de uma vez só
         public PortfolioService(
                         TransactionRepository transactionRepository,
                         AssetRepository assetRepository,
@@ -45,21 +45,21 @@ public class PortfolioService {
         public AssetPositionDTO calculateAssetPosition(String assetId) {
                 List<Transaction> transactions = transactionRepository.findByAssetId(assetId);
 
-                // 1. Valor Total Compras (Histórico Geral)
+                // 1. Total Purchase Value (General History)
                 BigDecimal totalPurchases = transactions.stream()
                                 .filter(t -> t.getOperationType() != null
                                                 && Integer.valueOf(1).equals(t.getOperationType().getIo()))
                                 .map(t -> multiply(t.getStock(), t.getUnitValue()))
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                // 2. Valor Total Vendas (Histórico Geral)
+                // 2. Total Sales Value (General History)
                 BigDecimal totalSales = transactions.stream()
                                 .filter(t -> t.getOperationType() != null
                                                 && Integer.valueOf(0).equals(t.getOperationType().getIo()))
                                 .map(t -> multiply(t.getStock(), t.getUnitValue()))
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                // 3. Saldo Total Investido (Apenas Transações com Active = 1)
+                // 3. Net Invested Balance (Only Active Transactions = 1)
                 BigDecimal activePurchasesValue = transactions.stream()
                                 .filter(t -> Integer.valueOf(1).equals(t.getActive()))
                                 .filter(t -> t.getOperationType() != null
@@ -76,7 +76,7 @@ public class PortfolioService {
 
                 BigDecimal netInvested = activePurchasesValue.subtract(activeSalesValue);
 
-                // --- QUANTIDADE FÍSICA DE AÇÕES (STOCK ATUAL) ---
+                // --- PHYSICAL QUANTITY OF SHARES (CURRENT STOCK) ---
                 BigDecimal stockPurchased = transactions.stream()
                                 .filter(t -> Integer.valueOf(1).equals(t.getActive()))
                                 .filter(t -> t.getOperationType() != null
@@ -95,22 +95,19 @@ public class PortfolioService {
 
                 BigDecimal currentStock = stockPurchased.subtract(stockSold);
 
-                // --- BUSCA CRONOLÓGICA DE PREÇO (MARKET DATA) ---
+                // --- CHRONOLOGICAL PRICE SEARCH (MARKET DATA) ---
                 LocalDate today = LocalDate.now();
                 BigDecimal lastPrice = priceRepository
                                 .findFirstByAssetIdAndDateLessThanEqualOrderByDateDesc(assetId, today)
                                 .map(Price::getPrice)
                                 .orElse(BigDecimal.ZERO);
 
-                // Valor da posição atualizado a mercado (Quantidade * Último Preço)
                 BigDecimal currentMarketValue = currentStock.multiply(lastPrice);
                 RoundingMode rm = RoundingMode.HALF_UP;
 
-                // Lucro/Prejuízo Individual = Valor de Mercado - Custo Líquido Investido
                 BigDecimal profitOrLoss = currentMarketValue.subtract(netInvested);
-
-                // Rentabilidade Individual % = ((Valor de Mercado / Custo Líquido) - 1) * 100
                 BigDecimal profitability = BigDecimal.ZERO;
+
                 if (netInvested.compareTo(BigDecimal.ZERO) > 0) {
                         profitability = currentMarketValue
                                         .divide(netInvested, 4, rm)
@@ -139,7 +136,6 @@ public class PortfolioService {
 
         public PortfolioSummaryDTO calculatePortfolioSummary() {
                 List<com.market.financial.model.Asset> allAssets = assetRepository.findAll();
-
                 List<AssetPositionDTO> activePositions = allAssets.stream()
                                 .map(asset -> calculateAssetPosition(asset.getId()))
                                 .filter(pos -> pos.netInvested() != null
@@ -162,6 +158,34 @@ public class PortfolioService {
                                 activePositions);
         }
 
+        // --- NOVO MÉTODO PARA RETORNAR APENAS AS 4 MÉTRICAS DE TOTALIZADORES ---
+        public PortfolioTotalDTO calculatePortfolioTotals() {
+                PortfolioSummaryDTO summary = calculatePortfolioSummary();
+                RoundingMode rm = RoundingMode.HALF_UP;
+
+                BigDecimal grandTotalInvested = summary.grandTotalInvested();
+                BigDecimal grandTotalMarketValue = summary.grandTotalMarketValue();
+
+                // Lucro/Prejuízo Absoluto = Valor de Mercado Total - Custo Total Investido
+                BigDecimal profitOrLoss = grandTotalMarketValue.subtract(grandTotalInvested);
+
+                // Rentabilidade Percentual (%) = ((Valor de Mercado Total / Custo Total) - 1) *
+                // 100
+                BigDecimal profitability = BigDecimal.ZERO;
+                if (grandTotalInvested.compareTo(BigDecimal.ZERO) > 0) {
+                        profitability = grandTotalMarketValue
+                                        .divide(grandTotalInvested, 4, rm)
+                                        .subtract(BigDecimal.ONE)
+                                        .multiply(BigDecimal.valueOf(100));
+                }
+
+                return new PortfolioTotalDTO(
+                                grandTotalInvested.setScale(2, rm),
+                                grandTotalMarketValue.setScale(2, rm),
+                                profitOrLoss.setScale(2, rm),
+                                profitability.setScale(2, rm));
+        }
+
         public BigDecimal calculateGrandTotalOnly() {
                 List<com.market.financial.model.Asset> allAssets = assetRepository.findAll();
                 return allAssets.stream()
@@ -180,75 +204,64 @@ public class PortfolioService {
                                 .setScale(2, RoundingMode.HALF_UP);
         }
 
-        // --- NOVA LÓGICA DE INTELIGÊNCIA INTEGRADA COM HISTÓRICO MENSAL ---
+        // --- INTEGRATED INTELLIGENCE LOGIC WITH MONTHLY HISTORY ---
         @Transactional(readOnly = true)
-        public List<PortfolioConsolidadoDTO> getHistoricoConsolidadoPorAtivo(String assetId) {
-                List<MonthlyConsolidated> consolidados = consolidatedRepo.findByAssetId(assetId);
+        public List<PortfolioConsolidatedDTO> getConsolidatedHistoryByAsset(String assetId) {
+                List<MonthlyConsolidated> consolidatedRecords = consolidatedRepo.findByAssetId(assetId);
 
-                return consolidados.stream().map(consolidado -> {
-                        LocalDate dataConsolidado = consolidado.getDate();
+                return consolidatedRecords.stream().map(consolidated -> {
+                        LocalDate consolidatedDate = consolidated.getDate();
+                        var priceOptional = priceRepository.findByAssetIdAndDate(assetId, consolidatedDate);
 
-                        // Usando o priceRepository unificado que foi injetado no início da classe
-                        var priceOptional = priceRepository.findByAssetIdAndDate(assetId, dataConsolidado);
-                        BigDecimal precoNaData = BigDecimal.ZERO;
+                        BigDecimal priceOnDate = priceOptional.map(Price::getPrice).orElse(BigDecimal.ZERO);
+                        BigDecimal shareQuantity = consolidated.getStock();
+                        BigDecimal equityValue = shareQuantity.multiply(priceOnDate);
 
-                        if (priceOptional.isPresent()) {
-                                precoNaData = priceOptional.get().getPrice();
-                        }
-
-                        BigDecimal quantidadeCotas = consolidado.getStock();
-                        BigDecimal valorPatrimonial = quantidadeCotas.multiply(precoNaData);
-
-                        return new PortfolioConsolidadoDTO(
-                                        dataConsolidado,
+                        return new PortfolioConsolidatedDTO(
+                                        consolidatedDate,
                                         assetId,
-                                        quantidadeCotas,
-                                        precoNaData,
-                                        valorPatrimonial);
+                                        shareQuantity,
+                                        priceOnDate,
+                                        equityValue);
                 }).collect(Collectors.toList());
         }
 
-        @Transactional(readOnly = true)
-        public PortfolioConsolidadoDataSummaryDTO getConsolidadoPorData(LocalDate data) {
-                List<MonthlyConsolidated> consolidados = consolidatedRepo.findByDate(data);
-                RoundingMode rm = RoundingMode.HALF_UP;
+    @Transactional(readOnly = true)
+    public PortfolioConsolidatedSummaryDTO getConsolidatedSummaryByDate(LocalDate date) {
+        // Correção 1: Garantia de tipagem forte na busca do repositório
+        List<MonthlyConsolidated> consolidatedRecords = consolidatedRepo.findByDate(date);
+        RoundingMode rm = RoundingMode.HALF_UP;
 
-                // 1. Mapeia e gera a lista com os dados individuais por ativo
-                List<PortfolioConsolidadoDTO> ativosList = consolidados.stream()
-                                .filter(c -> c.getAsset() != null)
-                                .map(consolidado -> {
-                                        String assetId = consolidado.getAsset().getId();
+        // Correção 2: Adicionada tipagem explícita <PortfolioConsolidatedDTO> na List e no stream
+        List<PortfolioConsolidatedDTO> assetList = consolidatedRecords.stream()
+                .filter(c -> c.getAsset() != null)
+                .map(consolidated -> {
+                    String assetId = consolidated.getAsset().getId();
+                    var priceOptional = priceRepository.findByAssetIdAndDate(assetId, date);
+                    
+                    BigDecimal priceOnDate = priceOptional.map(Price::getPrice).orElse(BigDecimal.ZERO);
+                    BigDecimal shareQuantity = consolidated.getStock();
+                    BigDecimal equityValue = shareQuantity.multiply(priceOnDate);
 
-                                        var priceOptional = priceRepository.findByAssetIdAndDate(assetId, data);
-                                        BigDecimal precoNaData = BigDecimal.ZERO;
+                    return new PortfolioConsolidatedDTO(
+                            date, 
+                            assetId, 
+                            shareQuantity, 
+                            priceOnDate.setScale(2, rm), 
+                            equityValue.setScale(2, rm));
+                })
+                .collect(Collectors.toList());
 
-                                        if (priceOptional.isPresent()) {
-                                                precoNaData = priceOptional.get().getPrice();
-                                        }
+        // Correção 3: Mapeamento direto usando o record em inglês .equityValue()
+        BigDecimal totalEquityValue = assetList.stream()
+                .map(PortfolioConsolidatedDTO::equityValue)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                                        BigDecimal quantidadeCotas = consolidado.getStock();
-                                        BigDecimal valorPatrimonial = quantidadeCotas.multiply(precoNaData);
-
-                                        return new PortfolioConsolidadoDTO(
-                                                        data,
-                                                        assetId,
-                                                        quantidadeCotas,
-                                                        precoNaData.setScale(2, rm),
-                                                        valorPatrimonial.setScale(2, rm));
-                                }).collect(Collectors.toList());
-
-                // 2. Soma o 'valorPatrimonialNaData' de cada ativo para obter o total geral da
-                // carteira
-                BigDecimal valorTotalPatrimonial = ativosList.stream()
-                                .map(PortfolioConsolidadoDTO::valorPatrimonialNaData) // Certifique-se de que o record
-                                                                                      // possui este método/campo gerado
-                                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                // 3. Retorna o DTO envelopado completo
-                return new PortfolioConsolidadoDataSummaryDTO(
-                                data,
-                                valorTotalPatrimonial.setScale(2, rm),
-                                ativosList);
-        }
+        // 3. Retorna o DTO com todos os dados tipados corretamente
+        return new PortfolioConsolidatedSummaryDTO(
+                date, 
+                totalEquityValue.setScale(2, rm), 
+                assetList);
+    }
 
 }
