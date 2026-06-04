@@ -25,6 +25,13 @@ public class TransactionController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    // NOVO: Endpoint para Vendas (Op 2, 3 e Inativação em lote)
+    @PostMapping("/sale")
+    public ResponseEntity<TransactionResponseDTO> createSale(@Valid @RequestBody TransactionRequestDTO request) {
+        TransactionResponseDTO response = transactionService.processSaleTransaction(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
     @GetMapping
     public List<TransactionResponseDTO> getAll() {
         return transactionService.findAll();

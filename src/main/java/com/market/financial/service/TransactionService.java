@@ -32,27 +32,30 @@ public class TransactionService {
         this.assetRepository = assetRepository;
         this.operationTypeRepository = operationTypeRepository;
     }
+
     @Transactional
     public TransactionResponseDTO processPurchaseTransaction(TransactionRequestDTO request) {
-        
+
         // 1. REGISTRO DA TRANSAÇÃO 1: Compra do Ativo (Operation_ID = 1)
         Asset purchasedAsset = assetRepository.findById(request.assetId())
                 .orElseThrow(() -> new ResourceNotFoundException("Asset not found: " + request.assetId()));
 
-        // Configura Tipo de Operação = 1 (Compra) usando o setter correto da sua entidade
+        // Configura Tipo de Operação = 1 (Compra) usando o setter correto da sua
+        // entidade
         OperationType buyOp = new OperationType();
-        buyOp.setIdOperation(1); 
+        buyOp.setIdOperation(1);
 
         Transaction purchaseTx = new Transaction();
         purchaseTx.setDate(request.date());
         purchaseTx.setAsset(purchasedAsset);
         purchaseTx.setOperationType(buyOp);
-        
+
         // Alinha precisão rigorosa de duas casas decimais
         purchaseTx.setStock(request.stock().setScale(2, RoundingMode.HALF_UP));
         purchaseTx.setUnitValue(request.unitValue().setScale(2, RoundingMode.HALF_UP));
-        purchaseTx.setFee(request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2));
-        
+        purchaseTx.setFee(
+                request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2));
+
         purchaseTx.setMemo(request.memo());
         purchaseTx.setActive(1);
         purchaseTx.setRefCompra(null);
@@ -91,6 +94,78 @@ public class TransactionService {
 
         // Retorna o DTO da Transação 1
         return convertToResponseDTO(savedPurchase);
+    }
+
+    @Transactional
+    public TransactionResponseDTO processSaleTransaction(TransactionRequestDTO request) {
+        // =========================================================================
+        // 1. REGISTRO DA TRANSAÇÃO 1: Venda do Ativo (Operation_ID = 2)
+        // =========================================================================
+        Asset soldAsset = assetRepository.findById(request.assetId())
+                .orElseThrow(() -> new ResourceNotFoundException("Asset not found: " + request.assetId()));
+
+        OperationType sellOp = new OperationType();
+        sellOp.setIdOperation(2); // Venda
+
+        Transaction saleTx = new Transaction();
+        saleTx.setDate(request.date());
+        saleTx.setAsset(soldAsset);
+        saleTx.setOperationType(sellOp);
+        saleTx.setStock(request.stock().setScale(2, RoundingMode.HALF_UP));
+        saleTx.setUnitValue(request.unitValue().setScale(2, RoundingMode.HALF_UP));
+        saleTx.setFee(
+                request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2));
+        saleTx.setMemo(request.memo());
+        saleTx.setActive(0); // Sempre 0 na venda conforme especificado
+        saleTx.setRefCompra(request.refCompra());
+        saleTx.setDateSales(request.date()); // Data da transação de venda
+
+        Transaction savedSale = transactionRepository.save(saleTx);
+
+        // =========================================================================
+        // 2. REGISTRO DA TRANSAÇÃO 2: Crédito no Caixa SPAXX (Operation_ID = 3)
+        // =========================================================================
+        Asset spaxxAsset = assetRepository.findById("SPAXX")
+                .orElseThrow(() -> new ResourceNotFoundException("Fixed cash asset 'SPAXX' not found in database."));
+
+        OperationType cashCreditOp = new OperationType();
+        cashCreditOp.setIdOperation(3); // Depósito/Crédito
+
+        Transaction cashTx = new Transaction();
+        cashTx.setDate(savedSale.getDate()); // Mesma data da transação_1
+        cashTx.setAsset(spaxxAsset);
+        cashTx.setOperationType(cashCreditOp);
+
+        // CORREÇÃO DA FÓRMULA: (Stock * Unit_Value) - Fee
+        BigDecimal grossAmount = savedSale.getStock().multiply(savedSale.getUnitValue());
+        BigDecimal feeAmount = savedSale.getFee() != null ? savedSale.getFee() : BigDecimal.ZERO;
+        BigDecimal netReceived = grossAmount.subtract(feeAmount);
+
+        cashTx.setStock(netReceived.setScale(2, RoundingMode.HALF_UP));
+        cashTx.setUnitValue(BigDecimal.ONE.setScale(2, RoundingMode.HALF_UP)); // Fixo 1
+        cashTx.setFee(null); // Fixo null
+        cashTx.setMemo("Venda " + soldAsset.getId()); // Substitui pelo valor do campo ID_ASSET
+        cashTx.setActive(1); // Fixo 1
+        cashTx.setRefCompra(null); // Fixo null
+        cashTx.setDateSales(null); // Fixo null
+
+        transactionRepository.save(cashTx);
+
+        // =========================================================================
+        // 3. OPERAÇÃO 3: Update em lote dos ativos anteriores com Active = 1
+        // =========================================================================
+        // Busca todos os registros com ID_Asset correspondente e que estão com Active =
+        // 1
+        List<Transaction> activeTransactions = transactionRepository.findByAssetIdAndActive(soldAsset.getId(), 1);
+
+        // Realiza o update dos campos conforme regra de negócio
+        for (Transaction activeTx : activeTransactions) {
+            activeTx.setActive(0);
+            activeTx.setDateSales(savedSale.getDate());
+            transactionRepository.save(activeTx); // Força a sincronização do lote no SQLite
+        }
+
+        return convertToResponseDTO(savedSale);
     }
 
     public List<TransactionResponseDTO> findAll() {
