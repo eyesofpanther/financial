@@ -19,6 +19,12 @@ public class TransactionController {
         this.transactionService = transactionService;
     }
 
+    @PostMapping("/purchase")
+    public ResponseEntity<TransactionResponseDTO> createPurchase(@Valid @RequestBody TransactionRequestDTO dto) {
+        TransactionResponseDTO response = transactionService.processPurchaseTransaction(dto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
     @GetMapping
     public List<TransactionResponseDTO> getAll() {
         return transactionService.findAll();
