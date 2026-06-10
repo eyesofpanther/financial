@@ -4,7 +4,6 @@ import com.market.financial.dto.AssetTypeRequestDTO;
 import com.market.financial.dto.AssetTypeResponseDTO;
 import com.market.financial.service.AssetTypeService;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,8 +14,13 @@ import java.util.List;
 @RequestMapping("/api/asset-types")
 public class AssetTypeController {
 
-    @Autowired
-    private AssetTypeService service;
+    // 1. Atributo final e sem @Autowired de campo
+    private final AssetTypeService service;
+
+    // 2. Construtor explícito para injeção via Spring
+    public AssetTypeController(AssetTypeService service) {
+        this.service = service;
+    }
 
     @GetMapping
     public ResponseEntity<List<AssetTypeResponseDTO>> getAll() {

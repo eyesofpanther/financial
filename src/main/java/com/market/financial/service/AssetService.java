@@ -7,7 +7,6 @@ import com.market.financial.model.Asset;
 import com.market.financial.model.AssetType;
 import com.market.financial.repository.AssetRepository;
 import com.market.financial.repository.AssetTypeRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Optional;
@@ -15,11 +14,18 @@ import java.util.Optional;
 @Service
 public class AssetService {
 
-    @Autowired
-    private AssetRepository repository;
+    // 1. Remova o @Autowired e mude os atributos para 'final'
+    private final AssetRepository repository;
+    private final AssetTypeRepository assetTypeRepository;
 
-    @Autowired
-    private AssetTypeRepository assetTypeRepository;
+    // 2. Crie um construtor explícito recebendo os repositórios
+    public AssetService(AssetRepository repository, AssetTypeRepository assetTypeRepository) {
+        this.repository = repository;
+        this.assetTypeRepository = assetTypeRepository;
+    }
+    
+    // ... restante do código permanece igual
+
 
     public List<Asset> findAll() {
         return repository.findAll();

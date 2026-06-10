@@ -5,11 +5,11 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
+//import org.springframework.stereotype.Repository;
 
 import com.market.financial.model.Price;
 
-@Repository
+//@Repository
 public interface PriceRepository extends JpaRepository<Price, Long> {
     // O Spring Data JPA monta o SQL automaticamente baseado no nome do método
     List<Price> findByAssetId(String assetId);

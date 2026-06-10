@@ -4,16 +4,21 @@ import com.market.financial.dto.OperationTypeRequestDTO;
 import com.market.financial.infra.exception.ResourceNotFoundException;
 import com.market.financial.model.OperationType;
 import com.market.financial.repository.OperationTypeRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
 import java.util.List;
 import java.util.Optional;
 
 @Service
 public class OperationTypeService {
 
-    @Autowired
-    private OperationTypeRepository repository;
+    // 1. Atributo final e sem @Autowired de campo
+    private final OperationTypeRepository repository;
+
+    // 2. Construtor explícito para injeção via Spring
+    public OperationTypeService(OperationTypeRepository repository) {
+        this.repository = repository;
+    }
 
     public List<OperationType> findAll() {
         return repository.findAll();
