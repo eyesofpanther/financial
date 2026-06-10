@@ -45,57 +45,87 @@ public class PortfolioService {
         public AssetPositionDTO calculateAssetPosition(String assetId) {
                 List<Transaction> transactions = transactionRepository.findByAssetId(assetId);
 
-                // 1. Total Purchase Value (General History)
+                // 1. Total Purchase Value (Histórico Geral - Inalterado)
                 BigDecimal totalPurchases = transactions.stream()
                                 .filter(t -> t.getOperationType() != null
                                                 && Integer.valueOf(1).equals(t.getOperationType().getIo()))
                                 .map(t -> multiply(t.getStock(), t.getUnitValue()))
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                // 2. Total Sales Value (General History)
+                // 2. Total Sales Value (Histórico Geral - Inalterado)
                 BigDecimal totalSales = transactions.stream()
                                 .filter(t -> t.getOperationType() != null
                                                 && Integer.valueOf(0).equals(t.getOperationType().getIo()))
                                 .map(t -> multiply(t.getStock(), t.getUnitValue()))
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                // 3. Net Invested Balance (Only Active Transactions = 1)
-                BigDecimal activePurchasesValue = transactions.stream()
-                                .filter(t -> Integer.valueOf(1).equals(t.getActive()))
-                                .filter(t -> t.getOperationType() != null
-                                                && Integer.valueOf(1).equals(t.getOperationType().getIo()))
-                                .map(t -> multiply(t.getStock(), t.getUnitValue()))
-                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                // 3. Net Invested Balance (Calculado estritamente com base nos Saldos dos Lotes
+                // Ativos FIFO)
+                BigDecimal netInvested;
+                if ("SPAXX".equals(assetId)) {
+                        // Para o caixa SPAXX, mantemos a lógica original de fluxo de caixa (Entradas -
+                        // Saídas)
+                        BigDecimal activePurchasesValue = transactions.stream()
+                                        .filter(t -> Integer.valueOf(1).equals(t.getActive()))
+                                        .filter(t -> t.getOperationType() != null
+                                                        && Integer.valueOf(1).equals(t.getOperationType().getIo()))
+                                        .map(t -> multiply(t.getStock(), t.getUnitValue()))
+                                        .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                BigDecimal activeSalesValue = transactions.stream()
-                                .filter(t -> Integer.valueOf(1).equals(t.getActive()))
-                                .filter(t -> t.getOperationType() != null
-                                                && Integer.valueOf(0).equals(t.getOperationType().getIo()))
-                                .map(t -> multiply(t.getStock(), t.getUnitValue()))
-                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        BigDecimal activeSalesValue = transactions.stream()
+                                        .filter(t -> Integer.valueOf(1).equals(t.getActive()))
+                                        .filter(t -> t.getOperationType() != null
+                                                        && Integer.valueOf(0).equals(t.getOperationType().getIo()))
+                                        .map(t -> multiply(t.getStock(), t.getUnitValue()))
+                                        .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                BigDecimal netInvested = activePurchasesValue.subtract(activeSalesValue);
+                        netInvested = activePurchasesValue.subtract(activeSalesValue);
+                } else {
+                        // Para Ações e FIIs, usamos o modelo FIFO estrito baseado no saldo dos lotes
+                        // ativos
+                        netInvested = transactions.stream()
+                                        .filter(t -> Integer.valueOf(1).equals(t.getActive()))
+                                        .filter(t -> t.getOperationType() != null
+                                                        && Integer.valueOf(1).equals(t.getOperationType().getIo()))
+                                        .map(t -> multiply(t.getAvailableQuantity(), t.getUnitValue()))
+                                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                }
 
-                // --- PHYSICAL QUANTITY OF SHARES (CURRENT STOCK) ---
-                BigDecimal stockPurchased = transactions.stream()
-                                .filter(t -> Integer.valueOf(1).equals(t.getActive()))
-                                .filter(t -> t.getOperationType() != null
-                                                && Integer.valueOf(1).equals(t.getOperationType().getIo()))
-                                .map(Transaction::getStock)
-                                .filter(Objects::nonNull)
-                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                // --- QUANTIDADE FÍSICA ATUAL DE COTAS (CURRENT STOCK) ---
+                // Agora reflete apenas o saldo disponível somado dos lotes de compra ativos
+                BigDecimal currentStock;
+                if ("SPAXX".equals(assetId)) {
+                        // Para o caixa SPAXX, a quantidade é o saldo líquido financeiro histórico ativo
+                        BigDecimal stockPurchased = transactions.stream()
+                                        .filter(t -> Integer.valueOf(1).equals(t.getActive()))
+                                        .filter(t -> t.getOperationType() != null
+                                                        && Integer.valueOf(1).equals(t.getOperationType().getIo()))
+                                        .map(Transaction::getStock)
+                                        .filter(Objects::nonNull)
+                                        .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                BigDecimal stockSold = transactions.stream()
-                                .filter(t -> Integer.valueOf(1).equals(t.getActive()))
-                                .filter(t -> t.getOperationType() != null
-                                                && Integer.valueOf(0).equals(t.getOperationType().getIo()))
-                                .map(Transaction::getStock)
-                                .filter(Objects::nonNull)
-                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        BigDecimal stockSold = transactions.stream()
+                                        .filter(t -> Integer.valueOf(1).equals(t.getActive()))
+                                        .filter(t -> t.getOperationType() != null
+                                                        && Integer.valueOf(0).equals(t.getOperationType().getIo()))
+                                        .map(Transaction::getStock)
+                                        .filter(Objects::nonNull)
+                                        .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-                BigDecimal currentStock = stockPurchased.subtract(stockSold);
+                        currentStock = stockPurchased.subtract(stockSold);
+                } else {
+                        // Para ativos normais, lê diretamente a nova coluna disponível controlada pelo
+                        // FIFO
+                        currentStock = transactions.stream()
+                                        .filter(t -> Integer.valueOf(1).equals(t.getActive()))
+                                        .filter(t -> t.getOperationType() != null
+                                                        && Integer.valueOf(1).equals(t.getOperationType().getIo()))
+                                        .map(Transaction::getAvailableQuantity)
+                                        .filter(Objects::nonNull)
+                                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                }
 
-                // --- CHRONOLOGICAL PRICE SEARCH (MARKET DATA) ---
+                // --- BUSCA CRONOLÓGICA DE PREÇOS (DADOS DE MERCADO - Inalterado) ---
                 LocalDate today = LocalDate.now();
                 BigDecimal lastPrice = priceRepository
                                 .findFirstByAssetIdAndDateLessThanEqualOrderByDateDesc(assetId, today)
@@ -103,11 +133,11 @@ public class PortfolioService {
                                 .orElse(BigDecimal.ZERO);
 
                 BigDecimal currentMarketValue = currentStock.multiply(lastPrice);
+
                 RoundingMode rm = RoundingMode.HALF_UP;
-
                 BigDecimal profitOrLoss = currentMarketValue.subtract(netInvested);
-                BigDecimal profitability = BigDecimal.ZERO;
 
+                BigDecimal profitability = BigDecimal.ZERO;
                 if (netInvested.compareTo(BigDecimal.ZERO) > 0) {
                         profitability = currentMarketValue
                                         .divide(netInvested, 4, rm)
@@ -226,42 +256,44 @@ public class PortfolioService {
                 }).collect(Collectors.toList());
         }
 
-    @Transactional(readOnly = true)
-    public PortfolioConsolidatedSummaryDTO getConsolidatedSummaryByDate(LocalDate date) {
-        // Correção 1: Garantia de tipagem forte na busca do repositório
-        List<MonthlyConsolidated> consolidatedRecords = consolidatedRepo.findByDate(date);
-        RoundingMode rm = RoundingMode.HALF_UP;
+        @Transactional(readOnly = true)
+        public PortfolioConsolidatedSummaryDTO getConsolidatedSummaryByDate(LocalDate date) {
+                // Correção 1: Garantia de tipagem forte na busca do repositório
+                List<MonthlyConsolidated> consolidatedRecords = consolidatedRepo.findByDate(date);
+                RoundingMode rm = RoundingMode.HALF_UP;
 
-        // Correção 2: Adicionada tipagem explícita <PortfolioConsolidatedDTO> na List e no stream
-        List<PortfolioConsolidatedDTO> assetList = consolidatedRecords.stream()
-                .filter(c -> c.getAsset() != null)
-                .map(consolidated -> {
-                    String assetId = consolidated.getAsset().getId();
-                    var priceOptional = priceRepository.findByAssetIdAndDate(assetId, date);
-                    
-                    BigDecimal priceOnDate = priceOptional.map(Price::getPrice).orElse(BigDecimal.ZERO);
-                    BigDecimal shareQuantity = consolidated.getStock();
-                    BigDecimal equityValue = shareQuantity.multiply(priceOnDate);
+                // Correção 2: Adicionada tipagem explícita <PortfolioConsolidatedDTO> na List e
+                // no stream
+                List<PortfolioConsolidatedDTO> assetList = consolidatedRecords.stream()
+                                .filter(c -> c.getAsset() != null)
+                                .map(consolidated -> {
+                                        String assetId = consolidated.getAsset().getId();
+                                        var priceOptional = priceRepository.findByAssetIdAndDate(assetId, date);
 
-                    return new PortfolioConsolidatedDTO(
-                            date, 
-                            assetId, 
-                            shareQuantity, 
-                            priceOnDate.setScale(2, rm), 
-                            equityValue.setScale(2, rm));
-                })
-                .collect(Collectors.toList());
+                                        BigDecimal priceOnDate = priceOptional.map(Price::getPrice)
+                                                        .orElse(BigDecimal.ZERO);
+                                        BigDecimal shareQuantity = consolidated.getStock();
+                                        BigDecimal equityValue = shareQuantity.multiply(priceOnDate);
 
-        // Correção 3: Mapeamento direto usando o record em inglês .equityValue()
-        BigDecimal totalEquityValue = assetList.stream()
-                .map(PortfolioConsolidatedDTO::equityValue)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                                        return new PortfolioConsolidatedDTO(
+                                                        date,
+                                                        assetId,
+                                                        shareQuantity,
+                                                        priceOnDate.setScale(2, rm),
+                                                        equityValue.setScale(2, rm));
+                                })
+                                .collect(Collectors.toList());
 
-        // 3. Retorna o DTO com todos os dados tipados corretamente
-        return new PortfolioConsolidatedSummaryDTO(
-                date, 
-                totalEquityValue.setScale(2, rm), 
-                assetList);
-    }
+                // Correção 3: Mapeamento direto usando o record em inglês .equityValue()
+                BigDecimal totalEquityValue = assetList.stream()
+                                .map(PortfolioConsolidatedDTO::equityValue)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                // 3. Retorna o DTO com todos os dados tipados corretamente
+                return new PortfolioConsolidatedSummaryDTO(
+                                date,
+                                totalEquityValue.setScale(2, rm),
+                                assetList);
+        }
 
 }

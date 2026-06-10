@@ -46,46 +46,116 @@ public class Transaction {
     @Column(name = "Date_Sales", length = 19)
     private LocalDate dateSales;
 
-    public Transaction() {}
+    @Column(name = "available_quantity", nullable = false)
+    private BigDecimal availableQuantity;
+
+    public Transaction() {
+    }
 
     // Getters e Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    public Long getId() {
+        return id;
+    }
 
-    public LocalDate getDate() { return date; }
-    public void setDate(LocalDate date) { this.date = date; }
+    public void setId(Long id) {
+        this.id = id;
+    }
 
-    public OperationType getOperationType() { return operationType; }
-    public void setOperationType(OperationType operationType) { this.operationType = operationType; }
+    public LocalDate getDate() {
+        return date;
+    }
 
-    public Asset getAsset() { return asset; }
-    public void setAsset(Asset asset) { this.asset = asset; }
+    public void setDate(LocalDate date) {
+        this.date = date;
+    }
 
-    public BigDecimal getStock() { return stock; }
-    public void setStock(BigDecimal stock) { this.stock = stock; }
+    public OperationType getOperationType() {
+        return operationType;
+    }
 
-    public BigDecimal getUnitValue() { return unitValue; }
-    public void setUnitValue(BigDecimal unitValue) { this.unitValue = unitValue; }
+    public void setOperationType(OperationType operationType) {
+        this.operationType = operationType;
+    }
 
-    public BigDecimal getFee() { return fee; }
-    public void setFee(BigDecimal fee) { this.fee = fee; }
+    public Asset getAsset() {
+        return asset;
+    }
 
-    public String getMemo() { return memo; }
-    public void setMemo(String memo) { this.memo = memo; }
+    public void setAsset(Asset asset) {
+        this.asset = asset;
+    }
 
-    public Integer getActive() { return active; }
-    public void setActive(Integer active) { this.active = active; }
+    public BigDecimal getStock() {
+        return stock;
+    }
 
-    public Integer getRefCompra() { return refCompra; }
-    public void setRefCompra(Integer refCompra) { this.refCompra = refCompra; }
+    public void setStock(BigDecimal stock) {
+        this.stock = stock;
+    }
 
-    public LocalDate getDateSales() { return dateSales; }
-    public void setDateSales(LocalDate dateSales) { this.dateSales = dateSales; }
+    public BigDecimal getUnitValue() {
+        return unitValue;
+    }
+
+    public void setUnitValue(BigDecimal unitValue) {
+        this.unitValue = unitValue;
+    }
+
+    public BigDecimal getFee() {
+        return fee;
+    }
+
+    public void setFee(BigDecimal fee) {
+        this.fee = fee;
+    }
+
+    public String getMemo() {
+        return memo;
+    }
+
+    public void setMemo(String memo) {
+        this.memo = memo;
+    }
+
+    public Integer getActive() {
+        return active;
+    }
+
+    public void setActive(Integer active) {
+        this.active = active;
+    }
+
+    public Integer getRefCompra() {
+        return refCompra;
+    }
+
+    public void setRefCompra(Integer refCompra) {
+        this.refCompra = refCompra;
+    }
+
+    public LocalDate getDateSales() {
+        return dateSales;
+    }
+
+    public void setDateSales(LocalDate dateSales) {
+        this.dateSales = dateSales;
+    }
+
+    public BigDecimal getAvailableQuantity() {
+        return availableQuantity;
+    }
+
+    public void setAvailableQuantity(BigDecimal availableQuantity) {
+        // Evita NullPointerException se inicializado incorretamente
+        this.availableQuantity = availableQuantity != null ? availableQuantity : BigDecimal.ZERO;
+    }
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
         Transaction that = (Transaction) o;
         return Objects.equals(id, that.id);
     }
