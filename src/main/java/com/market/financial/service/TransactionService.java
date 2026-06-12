@@ -22,7 +22,8 @@ public class TransactionService {
     private final AssetRepository assetRepository;
     private final OperationTypeRepository operationTypeRepository;
 
-    public TransactionService(TransactionRepository transactionRepository, AssetRepository assetRepository, OperationTypeRepository operationTypeRepository) {
+    public TransactionService(TransactionRepository transactionRepository, AssetRepository assetRepository,
+            OperationTypeRepository operationTypeRepository) {
         this.transactionRepository = transactionRepository;
         this.assetRepository = assetRepository;
         this.operationTypeRepository = operationTypeRepository;
@@ -40,17 +41,18 @@ public class TransactionService {
         purchaseTx.setDate(request.date());
         purchaseTx.setAsset(purchasedAsset);
         purchaseTx.setOperationType(buyOp);
-        
+
         BigDecimal stockScaled = request.stock().setScale(2, RoundingMode.HALF_UP);
         purchaseTx.setStock(stockScaled);
         purchaseTx.setUnitValue(request.unitValue().setScale(2, RoundingMode.HALF_UP));
-        purchaseTx.setFee(request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2));
+        purchaseTx.setFee(
+                request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2));
         purchaseTx.setMemo(request.memo());
         purchaseTx.setActive(1);
-        
+
         // CORREÇÃO: Alinha quantidade disponível com o total comprado
         purchaseTx.setAvailableQuantity(stockScaled);
-        
+
         purchaseTx.setRefCompra(null);
         purchaseTx.setDateSales(null);
 
@@ -69,16 +71,16 @@ public class TransactionService {
 
         BigDecimal totalSpent = savedPurchase.getStock().multiply(savedPurchase.getUnitValue());
         BigDecimal totalSpentScaled = totalSpent.setScale(2, RoundingMode.HALF_UP);
-        
+
         cashTx.setStock(totalSpentScaled);
         cashTx.setUnitValue(BigDecimal.ONE.setScale(2, RoundingMode.HALF_UP));
         cashTx.setFee(null);
         cashTx.setMemo("Compra " + purchasedAsset.getId());
         cashTx.setActive(1);
-        
+
         // CORREÇÃO: Caixa SPAXX espelha o valor total movimentado
         cashTx.setAvailableQuantity(totalSpentScaled);
-        
+
         cashTx.setRefCompra(null);
         cashTx.setDateSales(null);
 
@@ -101,7 +103,8 @@ public class TransactionService {
         saleTx.setOperationType(sellOp);
         saleTx.setStock(request.stock().setScale(2, RoundingMode.HALF_UP));
         saleTx.setUnitValue(request.unitValue().setScale(2, RoundingMode.HALF_UP));
-        saleTx.setFee(request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2));
+        saleTx.setFee(
+                request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2));
         saleTx.setMemo(request.memo());
         saleTx.setActive(0);
         saleTx.setAvailableQuantity(BigDecimal.ZERO.setScale(2));
@@ -171,6 +174,7 @@ public class TransactionService {
 
         return convertToResponseDTO(savedSale);
     }
+
     public List<TransactionResponseDTO> findAll() {
         return transactionRepository.findAll().stream()
                 .map(this::convertToResponseDTO)
@@ -205,27 +209,39 @@ public class TransactionService {
     private void mapRequestToEntity(TransactionRequestDTO request, Transaction transaction) {
         Asset asset = assetRepository.findById(request.assetId())
                 .orElseThrow(() -> new ResourceNotFoundException("Asset não encontrado: " + request.assetId()));
+
         OperationType opType = operationTypeRepository.findById(request.operationTypeId())
-                .orElseThrow(() -> new ResourceNotFoundException("Tipo de Operação não encontrado: " + request.operationTypeId()));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Tipo de Operação não encontrado: " + request.operationTypeId()));
 
         transaction.setDate(request.date());
         transaction.setAsset(asset);
         transaction.setOperationType(opType);
-        
-        BigDecimal stockScaled = request.stock() != null ? request.stock().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+
+        BigDecimal stockScaled = request.stock() != null ? request.stock().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
         transaction.setStock(stockScaled);
-        transaction.setUnitValue(request.unitValue() != null ? request.unitValue().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+
+        transaction.setUnitValue(
+                request.unitValue() != null ? request.unitValue().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
         transaction.setFee(request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
         transaction.setMemo(request.memo());
-        transaction.setActive(request.active());
         transaction.setRefCompra(request.refCompra());
         transaction.setDateSales(request.dateSales());
 
-        // CORREÇÃO: Proteção para cadastros manuais ou edições via endpoint padrão
-        if (opType.getIdOperation() == 1 || opType.getIdOperation() == 3 || opType.getIdOperation() == 4) {
+        // Switch Expression (Java Moderno): Define se a operação gera novas cotas/lotes
+        // para o FIFO
+        boolean incrementsInventory = switch (opType.getIdOperation()) {
+            case 1, 3, 4, 5, 6 -> true; // Compras, Ajustes de Caixa e Dividendos Reinvestidos
+            default -> false; // Vendas e demais movimentações
+        };
+
+        if (incrementsInventory) {
             transaction.setAvailableQuantity(stockScaled);
+            transaction.setActive(1);
         } else {
             transaction.setAvailableQuantity(BigDecimal.ZERO.setScale(2));
+            transaction.setActive(request.active() != null ? request.active() : 0);
         }
     }
 
@@ -242,8 +258,7 @@ public class TransactionService {
                 transaction.getMemo(),
                 transaction.getActive(),
                 transaction.getRefCompra(),
-                transaction.getDateSales()
-        );
+                transaction.getDateSales());
     }
 
     public List<TransactionResponseDTO> findByAssetId(String assetId) {
