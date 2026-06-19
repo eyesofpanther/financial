@@ -22,7 +22,8 @@ public class TransactionService {
     private final AssetRepository assetRepository;
     private final OperationTypeRepository operationTypeRepository;
 
-    public TransactionService(TransactionRepository transactionRepository, AssetRepository assetRepository,
+    public TransactionService(TransactionRepository transactionRepository,
+            AssetRepository assetRepository,
             OperationTypeRepository operationTypeRepository) {
         this.transactionRepository = transactionRepository;
         this.assetRepository = assetRepository;
@@ -49,10 +50,7 @@ public class TransactionService {
                 request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2));
         purchaseTx.setMemo(request.memo());
         purchaseTx.setActive(1);
-
-        // CORREÇÃO: Alinha quantidade disponível com o total comprado
         purchaseTx.setAvailableQuantity(stockScaled);
-
         purchaseTx.setRefCompra(null);
         purchaseTx.setDateSales(null);
 
@@ -71,16 +69,12 @@ public class TransactionService {
 
         BigDecimal totalSpent = savedPurchase.getStock().multiply(savedPurchase.getUnitValue());
         BigDecimal totalSpentScaled = totalSpent.setScale(2, RoundingMode.HALF_UP);
-
         cashTx.setStock(totalSpentScaled);
         cashTx.setUnitValue(BigDecimal.ONE.setScale(2, RoundingMode.HALF_UP));
         cashTx.setFee(null);
         cashTx.setMemo("Compra " + purchasedAsset.getId());
         cashTx.setActive(1);
-
-        // CORREÇÃO: Caixa SPAXX espelha o valor total movimentado
         cashTx.setAvailableQuantity(totalSpentScaled);
-
         cashTx.setRefCompra(null);
         cashTx.setDateSales(null);
 
@@ -128,7 +122,6 @@ public class TransactionService {
         BigDecimal feeAmount = savedSale.getFee() != null ? savedSale.getFee() : BigDecimal.ZERO;
         BigDecimal netReceived = grossAmount.subtract(feeAmount);
         BigDecimal netReceivedScaled = netReceived.setScale(2, RoundingMode.HALF_UP);
-
         cashTx.setStock(netReceivedScaled);
         cashTx.setUnitValue(BigDecimal.ONE.setScale(2, RoundingMode.HALF_UP));
         cashTx.setFee(null);
@@ -187,78 +180,74 @@ public class TransactionService {
                 .orElseThrow(() -> new ResourceNotFoundException("Transação não encontrada com ID: " + id));
     }
 
+    @Transactional
     public TransactionResponseDTO save(TransactionRequestDTO request) {
-        Transaction transaction = new Transaction();
-        mapRequestToEntity(request, transaction);
-        return convertToResponseDTO(transactionRepository.save(transaction));
-    }
+        // 🛡️ Blindagem: Impede o uso do fluxo genérico para operações estruturais de
+        // estoque
+        if (request.operationTypeId() == 1 || request.operationTypeId() == 2) {
+            throw new IllegalStateException(
+                    "Operação não permitida: Compras (1) e Vendas (2) possuem regras complexas de lote e " +
+                            "não podem usar o fluxo genérico. Utilize os endpoints dedicados /purchase ou /sale.");
+        }
 
-    public TransactionResponseDTO update(Long id, TransactionRequestDTO request) {
-        Transaction transaction = transactionRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Transação não encontrada com ID: " + id));
-        mapRequestToEntity(request, transaction);
-        return convertToResponseDTO(transactionRepository.save(transaction));
-    }
-
-    public void delete(Long id) {
-        Transaction transaction = transactionRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Transação não encontrada com ID: " + id));
-        transactionRepository.delete(transaction);
-    }
-
-    private void mapRequestToEntity(TransactionRequestDTO request, Transaction transaction) {
         Asset asset = assetRepository.findById(request.assetId())
                 .orElseThrow(() -> new ResourceNotFoundException("Asset não encontrado: " + request.assetId()));
-
         OperationType opType = operationTypeRepository.findById(request.operationTypeId())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Tipo de Operação não encontrado: " + request.operationTypeId()));
 
-        transaction.setDate(request.date());
-        transaction.setAsset(asset);
-        transaction.setOperationType(opType);
+        Transaction transaction = new Transaction();
+        mapRequestToEntity(request, transaction, asset, opType);
 
-        BigDecimal stockScaled = request.stock() != null ? request.stock().setScale(2, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO;
-        transaction.setStock(stockScaled);
-
-        transaction.setUnitValue(
-                request.unitValue() != null ? request.unitValue().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
-        transaction.setFee(request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
-        transaction.setMemo(request.memo());
-        transaction.setRefCompra(request.refCompra());
-        transaction.setDateSales(request.dateSales());
-
-        // Switch Expression (Java Moderno): Define se a operação gera novas cotas/lotes
-        // para o FIFO
-        boolean incrementsInventory = switch (opType.getIdOperation()) {
-            case 1, 3, 4, 5, 6 -> true; // Compras, Ajustes de Caixa e Dividendos Reinvestidos
-            default -> false; // Vendas e demais movimentações
-        };
-
-        if (incrementsInventory) {
-            transaction.setAvailableQuantity(stockScaled);
-            transaction.setActive(1);
-        } else {
-            transaction.setAvailableQuantity(BigDecimal.ZERO.setScale(2));
-            transaction.setActive(request.active() != null ? request.active() : 0);
-        }
+        return convertToResponseDTO(transactionRepository.save(transaction));
     }
 
-    private TransactionResponseDTO convertToResponseDTO(Transaction transaction) {
-        return new TransactionResponseDTO(
-                transaction.getId(),
-                transaction.getDate(),
-                transaction.getOperationType() != null ? transaction.getOperationType().getIdOperation() : null,
-                transaction.getOperationType() != null ? transaction.getOperationType().getDescription() : null,
-                transaction.getAsset() != null ? transaction.getAsset().getId() : null,
-                transaction.getStock(),
-                transaction.getUnitValue(),
-                transaction.getFee(),
-                transaction.getMemo(),
-                transaction.getActive(),
-                transaction.getRefCompra(),
-                transaction.getDateSales());
+    @Transactional
+    public TransactionResponseDTO update(Long id, TransactionRequestDTO request) {
+        Transaction transaction = transactionRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Transação não encontrada com ID: " + id));
+
+        // Validação preventiva contra mutabilidade de campos que quebram o FIFO
+        if (hasCriticalChanges(transaction, request)) {
+            throw new IllegalStateException(
+                    "Alterações estruturais (ativo, quantidade ou data) não são permitidas via update " +
+                            "direto para proteger a integridade do motor FIFO. Use a exclusão restrita ou estorno.");
+        }
+
+        // Permite apenas edição de campos neutros e metadados
+        transaction.setMemo(request.memo());
+        if (request.fee() != null) {
+            transaction.setFee(request.fee().setScale(2, RoundingMode.HALF_UP));
+        }
+
+        return convertToResponseDTO(transactionRepository.save(transaction));
+    }
+
+    @Transactional
+    public void delete(Long id) {
+        Transaction transaction = transactionRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Transação não encontrada com ID: " + id));
+
+        int idOp = transaction.getOperationType().getIdOperation();
+
+        // Regra de Ouro do FIFO: Compras (ID 1) só podem ser excluídas se o lote
+        // estiver 100% intacto
+        if (idOp == 1) {
+            if (transaction.getAvailableQuantity().compareTo(transaction.getStock()) != 0) {
+                throw new IllegalStateException(
+                        "Operação abortada: Esta compra não pode ser excluída porque seu lote " +
+                                "de ativos já foi parcial ou totalmente consumido por uma ou mais vendas subsequentes.");
+            }
+        }
+        // Vendas (ID 2) exigem estorno e recálculo cronológico completo para devolver
+        // cotas aos lotes antigos
+        else if (idOp == 2) {
+            throw new IllegalStateException(
+                    "Operação abortada: A exclusão direta de vendas quebraria o histórico do FIFO. " +
+                            "Para corrigir esta operação, desfaça as transações dependentes ou utilize um lançamento de ajuste.");
+        }
+
+        transactionRepository.delete(transaction);
     }
 
     public List<TransactionResponseDTO> findByAssetId(String assetId) {
@@ -280,10 +269,65 @@ public class TransactionService {
     }
 
     public List<TransactionResponseDTO> findByDate(java.time.LocalDate date) {
-        List<Transaction> transactions = transactionRepository.findByDate(date);
-        if (transactions.isEmpty()) {
-            throw new ResourceNotFoundException("Nenhuma transação financeira foi localizada na data " + date + ".");
+        // Alinhado com o padrão REST: retorna lista vazia estável se não houver
+        // registros
+        return transactionRepository.findByDate(date).stream()
+                .map(this::convertToResponseDTO)
+                .toList();
+    }
+
+    private void mapRequestToEntity(TransactionRequestDTO request, Transaction transaction, Asset asset,
+            OperationType opType) {
+        transaction.setDate(request.date());
+        transaction.setAsset(asset);
+        transaction.setOperationType(opType);
+        transaction.setMemo(request.memo());
+        transaction.setRefCompra(request.refCompra());
+        transaction.setDateSales(request.dateSales());
+
+        BigDecimal stockScaled = request.stock() != null ? request.stock().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+        transaction.setStock(stockScaled);
+
+        transaction.setUnitValue(
+                request.unitValue() != null ? request.unitValue().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+        transaction.setFee(request.fee() != null ? request.fee().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+
+        // Switch Expression (Java 25): Identifica operações de incremento de estoque
+        boolean incrementsInventory = switch (opType.getIdOperation()) {
+            case 1, 3, 4, 5, 6 -> true;
+            default -> false;
+        };
+
+        if (incrementsInventory) {
+            transaction.setAvailableQuantity(stockScaled);
+            transaction.setActive(1);
+        } else {
+            transaction.setAvailableQuantity(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            transaction.setActive(request.active() != null ? request.active() : 0);
         }
-        return transactions.stream().map(this::convertToResponseDTO).toList();
+    }
+
+    private TransactionResponseDTO convertToResponseDTO(Transaction transaction) {
+        return new TransactionResponseDTO(
+                transaction.getId(),
+                transaction.getDate(),
+                transaction.getOperationType() != null ? transaction.getOperationType().getIdOperation() : null,
+                transaction.getOperationType() != null ? transaction.getOperationType().getDescription() : null,
+                transaction.getAsset() != null ? transaction.getAsset().getId() : null,
+                transaction.getStock(),
+                transaction.getUnitValue(),
+                transaction.getFee(),
+                transaction.getMemo(),
+                transaction.getActive(),
+                transaction.getRefCompra(),
+                transaction.getDateSales());
+    }
+
+    private boolean hasCriticalChanges(Transaction tx, TransactionRequestDTO req) {
+        return tx.getStock().compareTo(req.stock()) != 0 ||
+                tx.getUnitValue().compareTo(req.unitValue()) != 0 ||
+                !tx.getDate().equals(req.date()) ||
+                !tx.getAsset().getId().equals(req.assetId());
     }
 }
