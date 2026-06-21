@@ -1,13 +1,16 @@
 package com.market.financial.service;
 
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.stereotype.Service;
+
 import com.market.financial.dto.OperationTypeRequestDTO;
 import com.market.financial.infra.exception.ResourceNotFoundException;
 import com.market.financial.model.OperationType;
 import com.market.financial.repository.OperationTypeRepository;
-import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.Optional;
+import jakarta.transaction.Transactional;
 
 @Service
 public class OperationTypeService {
@@ -43,10 +46,12 @@ public class OperationTypeService {
         }).orElseThrow(() -> new ResourceNotFoundException("Operation Type não encontrado com o ID: " + id));
     }
 
+    @Transactional // 🔥 Garante o controle estrito da transação
     public void delete(Integer id) {
         if (!repository.existsById(id)) {
             throw new ResourceNotFoundException("Operation Type não encontrado com o ID: " + id);
         }
         repository.deleteById(id);
+        repository.flush(); // 🔥 FORÇA o comando DELETE a ir para o banco imediatamente
     }
 }
