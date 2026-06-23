@@ -1,13 +1,16 @@
 package com.market.financial.service;
 
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.stereotype.Service;
+
 import com.market.financial.dto.AssetTypeRequestDTO;
 import com.market.financial.infra.exception.ResourceNotFoundException;
 import com.market.financial.model.AssetType;
 import com.market.financial.repository.AssetTypeRepository;
-import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.Optional;
+import jakarta.transaction.Transactional;
 
 @Service
 public class AssetTypeService {
@@ -41,10 +44,12 @@ public class AssetTypeService {
         }).orElseThrow(() -> new ResourceNotFoundException("Asset Type não encontrado com o ID: " + id));
     }
 
+    @Transactional
     public void delete(Integer id) {
         if (!repository.existsById(id)) {
             throw new ResourceNotFoundException("Asset Type não encontrado com o ID: " + id);
         }
         repository.deleteById(id);
+        repository.flush();
     }
 }
