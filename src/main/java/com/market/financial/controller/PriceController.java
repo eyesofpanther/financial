@@ -3,7 +3,7 @@ package com.market.financial.controller;
 import com.market.financial.dto.PriceRequestDTO;
 import com.market.financial.dto.PriceResponseDTO;
 import com.market.financial.service.PriceService;
-
+import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -37,7 +37,7 @@ public class PriceController {
     public ResponseEntity<List<PriceResponseDTO>> getPricesByAssetId(@PathVariable String assetId) {
         List<PriceResponseDTO> prices = priceService.findByAssetId(assetId);
         if (prices.isEmpty()) {
-            return ResponseEntity.noContent().build(); // Retorna 204 se não houver preços para o ativo
+            return ResponseEntity.noContent().build();
         }
         return ResponseEntity.ok(prices);
     }
@@ -46,40 +46,32 @@ public class PriceController {
     public ResponseEntity<PriceResponseDTO> getPriceByAssetAndDate(
             @RequestParam String assetId,
             @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate date) {
-
         PriceResponseDTO response = priceService.findByAssetIdAndDate(assetId, date);
         return ResponseEntity.ok(response);
     }
 
     @PostMapping
-    public ResponseEntity<PriceResponseDTO> createPrice(
-            @jakarta.validation.Valid @RequestBody PriceRequestDTO request) {
+    public ResponseEntity<PriceResponseDTO> createPrice(@Valid @RequestBody PriceRequestDTO request) {
         return ResponseEntity.ok(priceService.save(request));
     }
 
+    // REMOVIDO O TRY-CATCH MASCARADOR
     @PutMapping("/{id}")
-    public ResponseEntity<PriceResponseDTO> updatePrice(@PathVariable Long id,
-            @jakarta.validation.Valid @RequestBody PriceRequestDTO request) {
-        try {
-            return ResponseEntity.ok(priceService.update(id, request));
-        } catch (RuntimeException e) {
-            return ResponseEntity.notFound().build();
-        }
+    public ResponseEntity<PriceResponseDTO> updatePrice(@PathVariable Long id, @Valid @RequestBody PriceRequestDTO request) {
+        PriceResponseDTO response = priceService.update(id, request);
+        return ResponseEntity.ok(response);
     }
 
+    // REMOVIDO O TRY-CATCH MASCARADOR
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deletePrice(@PathVariable Long id) {
-        try {
-            priceService.delete(id);
-            return ResponseEntity.ok().build();
-        } catch (RuntimeException e) {
-            return ResponseEntity.notFound().build();
-        }
+        priceService.delete(id);
+        return ResponseEntity.noContent().build(); // Boa prática: DELETE bem-sucedido retorna 204 No Content
     }
 
     @GetMapping("/date/{date}")
-    public org.springframework.http.ResponseEntity<List<com.market.financial.dto.PriceResponseDTO>> getPricesByDate(
-            @PathVariable @org.springframework.format.annotation.DateTimeFormat(pattern = "yyyy-MM-dd") java.time.LocalDate date) {
-        return org.springframework.http.ResponseEntity.ok(priceService.findByDate(date));
+    public ResponseEntity<List<PriceResponseDTO>> getPricesByDate(
+            @PathVariable @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate date) {
+        return ResponseEntity.ok(priceService.findByDate(date));
     }
 }
