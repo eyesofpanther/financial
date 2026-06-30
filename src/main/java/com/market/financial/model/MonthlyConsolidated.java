@@ -11,7 +11,7 @@ public class MonthlyConsolidated {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "ID_Consolidado")
+    @Column(name = "ID")
     private Long id;
 
     @Column(name = "Date", nullable = false, length = 19)
