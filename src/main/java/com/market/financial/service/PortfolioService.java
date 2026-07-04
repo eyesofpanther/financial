@@ -275,6 +275,47 @@ public class PortfolioService {
                             equityValue);
                 }).collect(Collectors.toList());
     }
+    
+    // --- NOVO: BUSCA HISTÓRICO CONSOLIDADO POR DATA (EOD) ---
+    @Transactional(readOnly = true)
+    public List<PortfolioConsolidatedDTO> getConsolidatedHistoryByDate(LocalDate date) {
+        List<MonthlyConsolidated> consolidatedRecords = consolidatedRepo.findByDate(date);
+        RoundingMode rm = RoundingMode.HALF_UP;
+
+        return consolidatedRecords.stream()
+            .filter(Objects::nonNull)
+            .map(consolidated -> {
+                // Blindagem de segurança: garante que o relacionamento com Asset não é nulo
+                if (consolidated.getAsset() == null) {
+                    return null;
+                }
+                String assetId = consolidated.getAsset().getId();
+                
+                var priceOptional = priceRepository.findByAssetIdAndDate(assetId, date);
+                
+                // Regra de negócio mantida: SPAXX vale sempre 1, outros buscam no banco
+                BigDecimal priceOnDate = "SPAXX".equals(assetId) 
+                    ? BigDecimal.ONE 
+                    : priceOptional.map(p -> p.getPrice()).orElse(BigDecimal.ZERO);
+                
+                BigDecimal shareQuantity = consolidated.getStock();
+                BigDecimal equityValue = (shareQuantity == null) 
+                    ? BigDecimal.ZERO 
+                    : shareQuantity.multiply(priceOnDate);
+
+                return new PortfolioConsolidatedDTO(
+                    date,
+                    assetId,
+                    shareQuantity,
+                    priceOnDate.setScale(2, rm),
+                    equityValue.setScale(2, rm)
+                );
+            })
+            .filter(Objects::nonNull) // Remove registros inválidos da lista final se houver asset nulo
+            .collect(Collectors.toList());
+    }
+
+
 
     @Transactional(readOnly = true)
     public PortfolioConsolidatedSummaryDTO getConsolidatedSummaryByDate(LocalDate date) {

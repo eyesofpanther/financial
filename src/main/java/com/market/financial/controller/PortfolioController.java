@@ -1,6 +1,7 @@
 package com.market.financial.controller;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 
 import org.springframework.format.annotation.DateTimeFormat;
@@ -16,7 +17,7 @@ import com.market.financial.dto.AssetPositionDTO;
 import com.market.financial.dto.PortfolioConsolidatedDTO;
 import com.market.financial.dto.PortfolioConsolidatedSummaryDTO;
 import com.market.financial.dto.PortfolioSummaryDTO;
-import com.market.financial.dto.PortfolioTotalDTO; // 1. Importação do DTO correto adicionada
+import com.market.financial.dto.PortfolioTotalDTO;
 import com.market.financial.service.PortfolioService;
 
 import jakarta.validation.constraints.NotBlank;
@@ -33,16 +34,12 @@ public class PortfolioController {
         this.portfolioService = portfolioService;
     }
 
-    // 2. CORREÇÃO DO 404: Cria o endpoint para responder na rota base (/api/portfolio)
-    // Retorna a visão geral (Totais + Lista de Ativos)
     @GetMapping({"", "/"})
     public ResponseEntity<PortfolioSummaryDTO> getPortfolioFullSummary() {
         PortfolioSummaryDTO summary = portfolioService.calculatePortfolioSummary();
         return ResponseEntity.ok(summary);
     }
 
-    // 3. CORREÇÃO DA INVERSÃO: Altera o retorno para PortfolioTotalDTO 
-    // e chama a função correta (calculatePortfolioTotals) que traz apenas as 4 métricas
     @GetMapping("/summary")
     public ResponseEntity<PortfolioTotalDTO> getPortfolioSummary() {
         PortfolioTotalDTO totals = portfolioService.calculatePortfolioTotals();
@@ -56,15 +53,34 @@ public class PortfolioController {
         return ResponseEntity.ok(position);
     }
 
-    // --- NEW ENDPOINTS TRANSLATED AND STANDARDIZED ---
+    // --- ENDPOINTS DE HISTÓRICO CONSOLIDADO UNIFICADOS E SEGUROS ---
 
-    @GetMapping("/consolidado/{assetId}")
+    /**
+     * Endpoint dinâmico que aceita tanto o ID do ativo (ex: IBM) quanto uma data (ex: 2026-06-30).
+     * Resolve o problema de colisão de rotas no Spring Boot.
+     */
+    @GetMapping("/consolidado/{parametro}")
     public ResponseEntity<List<PortfolioConsolidatedDTO>> getConsolidatedHistory(
-            @PathVariable @NotBlank(message = "Asset ID is required") String assetId) {
-        List<PortfolioConsolidatedDTO> history = portfolioService.getConsolidatedHistoryByAsset(assetId);
-        return ResponseEntity.ok(history);
+            @PathVariable @NotBlank(message = "Parameter (Asset ID or Date) is required") String parametro) {
+        try {
+            // Tenta interpretar o parâmetro recebido na URL como uma data válida (AAAA-MM-DD)
+            LocalDate data = LocalDate.parse(parametro);
+            
+            // Se der certo, chama a nova lógica de histórico por data que criamos na Service
+            List<PortfolioConsolidatedDTO> historyByDate = portfolioService.getConsolidatedHistoryByDate(data);
+            return ResponseEntity.ok(historyByDate);
+            
+        } catch (DateTimeParseException e) {
+            // Se falhar a conversão para data, assume que é o ID de um ativo (ex: IBM, SPAXX)
+            List<PortfolioConsolidatedDTO> historyByAsset = portfolioService.getConsolidatedHistoryByAsset(parametro);
+            return ResponseEntity.ok(historyByAsset);
+        }
     }
 
+    /**
+     * Mantido por retrocompatibilidade caso queira consultar o Objeto Sumário completo via Query Param.
+     * Chamada: /api/portfolio/consolidado?date=2026-06-30
+     */
     @GetMapping("/consolidado")
     public ResponseEntity<PortfolioConsolidatedSummaryDTO> getConsolidatedSummary(
             @RequestParam("date") @NotNull(message = "Date parameter is required") 
